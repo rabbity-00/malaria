@@ -10,6 +10,7 @@ import argparse
 import json  # Added for parsing
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from tqdm import tqdm
+import kagglehub
 
 class MalariaDataset(Dataset):
     def __init__(self, img_dir, annotations, transforms=None):
@@ -26,9 +27,15 @@ class MalariaDataset(Dataset):
         
         try:
             img = cv2.imread(img_path)
+
             if img is None:
                 raise IOError(f"Could not read image: {img_path}")
+
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+            # Convert HWC -> CHW
+            img = torch.from_numpy(img).permute(2, 0, 1)
+
         except Exception as e:
             print(f"Error loading image {img_path}: {e}")
             img = torch.zeros((3, 224, 224), dtype=torch.uint8)
@@ -186,11 +193,15 @@ def load_annotations_from_json(json_path, img_dir):
     return all_annotations, class_to_idx
 
 def main():
-    IMG_DIR = "path/to/malaria-bounding-boxes/malaria/images" 
-    JSON_PATH = "path/to/malaria-bounding-boxes/malaria/training.json"
+    # Download/access dataset
+    path = kagglehub.dataset_download("kmader/malaria-bounding-boxes")
+    print("Dataset path:", path)
+
+    IMG_DIR = os.path.join(path, "malaria", "images")
+    JSON_PATH = os.path.join(path, "malaria", "training.json")
     
     BATCH_SIZE = 4
-    NUM_EPOCHS = 10
+    NUM_EPOCHS = 20
     LEARNING_RATE = 0.005
     
     if IMG_DIR == "path/to/malaria-bounding-boxes/malaria/images" or \
@@ -237,7 +248,7 @@ def main():
         dataset_train,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        num_workers=2,
+        num_workers=0,
         collate_fn=collate_fn
     )
     dataloader_val = DataLoader(
@@ -253,7 +264,7 @@ def main():
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=LEARNING_RATE, momentum=0.9, weight_decay=0.0005)
     
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
     best_map = 0.0
     for epoch in range(NUM_EPOCHS):
